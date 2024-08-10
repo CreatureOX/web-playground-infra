@@ -1,0 +1,29 @@
+[
+    {
+        "targets":[
+            "host.docker.internal:18081"
+        ],
+        "labels":{
+            "env": "dev",
+            "application":"playground-user"
+        }
+    },
+    {
+        "targets":[
+            "host.docker.internal:18082"
+        ],
+        "labels":{
+            "env": "dev",
+            "application":"playground-message"
+        }
+    },
+    {
+        "targets":[
+            "host.docker.internal:18083"
+        ],
+        "labels":{
+            "env": "dev",
+            "application":"playground-employee"
+        }
+    }
+]

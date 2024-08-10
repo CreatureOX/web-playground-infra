@@ -1,0 +1,274 @@
+version: '3'
+
+services:
+  mysql:                                            
+    image: mysql:${MYSQL_TAG}                       
+    container_name: mysql                           
+    command:
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --lower-case-table-names=1
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}   #设置root帐号密码
+    ports:
+      - ${MYSQL_PORT}:3306
+    networks:
+      - apollo
+      - xxl-job
+    volumes:
+      - ${APOLLO_SQL_DIR}/apolloconfigdb.sql:/docker-entrypoint-initdb.d/apolloconfigdb.sql
+      - ${APOLLO_SQL_DIR}/apolloportaldb.sql:/docker-entrypoint-initdb.d/apolloportaldb.sql
+      - ${XXL_JOB_SQL_DIR}/tables_xxl_job.sql:/docker-entrypoint-initdb.d/tables_xxl_job.sql  
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  apollo-configservice:
+    image: apolloconfig/apollo-configservice:${APOLLO_TAG}
+    container_name: apollo-configservice
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - ${APOLLO_CONFIG_PORT}:8080
+    networks:
+      - apollo
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:${MYSQL_PORT}/ApolloConfigDB?zeroDateTimeBehavior=convertToNull&useUnicode=true&characterEncoding=utf-8&allowMultiQueries=true&useSSL=false&allowPublicKeyRetrieval=true
+      - SPRING_DATASOURCE_USERNAME=root
+      - SPRING_DATASOURCE_PASSWORD=${MYSQL_ROOT_PASSWORD}  
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-cache --spider 'http://localhost:8080/health' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  apollo-adminservice:
+    image: apolloconfig/apollo-adminservice:${APOLLO_TAG}
+    container_name: apollo-adminservice
+    depends_on:
+      apollo-configservice:
+        condition: service_healthy      
+    ports:
+      - ${APOLLO_ADMIN_PORT}:8090
+    networks:
+      - apollo
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:${MYSQL_PORT}/ApolloConfigDB?zeroDateTimeBehavior=convertToNull&useUnicode=true&characterEncoding=utf-8&allowMultiQueries=true&useSSL=false&allowPublicKeyRetrieval=true
+      - SPRING_DATASOURCE_USERNAME=root
+      - SPRING_DATASOURCE_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - EUREKA_SERVER_ENABLE=true
+      - EUREKA_URLS=http://apollo-configservice:8080/eureka
+
+  apollo-portal:
+    image: apolloconfig/apollo-portal:${APOLLO_TAG}
+    container_name: apollo-portal
+    depends_on:
+      apollo-configservice:
+        condition: service_healthy
+    ports:
+      - ${APOLLO_PORTAL_PORT}:8070
+    networks:
+      - apollo
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:${MYSQL_PORT}/ApolloPortalDB?zeroDateTimeBehavior=convertToNull&useUnicode=true&characterEncoding=utf-8&allowMultiQueries=true&useSSL=false&allowPublicKeyRetrieval=true
+      - SPRING_DATASOURCE_USERNAME=root
+      - SPRING_DATASOURCE_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - APOLLO_PORTAL_ENVS=dev
+      - DEV_META=http://apollo-configservice:8080
+
+  xxl-job-admin:
+    image: xuxueli/xxl-job-admin:${XXL_JOB_TAG}
+    container_name: xxl-job-admin
+    ports:
+      - ${XXL_JOB_ADMIN_PORT}:8080
+    networks:
+      - xxl-job
+    volumes:
+      - ${XXL_JOB_DIR}/data/logs:/data/applogs
+      - ${XXL_JOB_DIR}/data/xxl-job/:/xxl-job
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:${MYSQL_PORT}/xxl_job?Unicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  redis:
+    image: redis:${REDIS_TAG}
+    container_name: redis 
+    ports:
+      - ${REDIS_PORT}:6379
+    volumes:
+      - ${REDIS_DIR}/dаta:/root/redis
+      - ${REDIS_DIR}/redis.conf:/usr/local/etc/redis/redis.conf
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_PORT=${REDIS_PORT}
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ES_VERSION}
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - ${ES_PORT}:9200
+      - ${ES_DATA_PORT}:9300
+    volumes:
+      - ${ES_DATA_DIR}/esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test: [ "CMD-SHELL", "curl --silent --fail localhost:9200/_cluster/health || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  rmqnamesrv:
+    image: foxiswho/rocketmq:server
+    container_name: rmqnamesrv
+    ports:
+      - ${RMQ_NAMESRV_PORT}:9876
+    volumes:
+      - ${RMQ_NAMESRV_DIR}/logs:/opt/logs
+      - ${RMQ_NAMESRV_DIR}/store:/opt/store
+    networks:
+        rmq:
+          aliases:
+            - rmqnamesrv
+  rmqbroker:
+    image: foxiswho/rocketmq:broker
+    container_name: rmqbroker
+    ports:
+      - ${RMQ_BROKER_FAST_LISTEN_PORT}:10909
+      - ${RMQ_BROKER_LISTEN_PORT}:10911
+    volumes:
+      - ${RMQ_BROKER_DIR}/logs:/opt/logs
+      - ${RMQ_BROKER_DIR}/store:/opt/store
+      - ${RMQ_BROKER_DIR}/conf/broker.conf:/etc/rocketmq/broker.conf
+    environment:
+        NAMESRV_ADDR: "rmqnamesrv:9876"
+        JAVA_OPTS: " -Duser.home=/opt"
+        JAVA_OPT_EXT: "-server -Xms128m -Xmx128m -Xmn128m"
+    command: mqbroker -c /etc/rocketmq/broker.conf
+    depends_on:
+      - rmqnamesrv
+    networks:
+      rmq:
+        aliases:
+          - rmqbroker
+  rmqconsole:
+    image: styletang/rocketmq-console-ng
+    container_name: rmqconsole
+    ports:
+      - ${RMQ_CONSOLE_PORT}:8080
+    environment:
+        JAVA_OPTS: "-Drocketmq.namesrv.addr=rmqnamesrv:9876 -Dcom.rocketmq.sendMessageWithVIPChannel=false"
+    depends_on:
+      - rmqnamesrv
+    networks:
+      rmq:
+        aliases:
+          - rmqconsole
+
+  nacos:
+    image: nacos/nacos-server
+    container_name: nacos
+    ports:
+      - ${NACOS_PORT}:8848
+      - ${NACOS_GRPC_PORT}:9848
+      - ${NACOS_GRPC_SYNC_PORT}:9849
+    environment:
+      - MODE=standalone  
+    # volumes:
+    #   - ${NACOS_DIR}/nacos/logs:/home/nacos/logs
+    #   - ${NACOS_DIR}/nacos/plugins:/home/nacos/plugins    
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    command:
+      '--config.file=/etc/prometheus/prometheus.yml'
+    ports:
+      - ${PROMETHEUS_PORT}:9090
+    restart: unless-stopped
+    volumes:
+      - ${PROMETHEUS_DIR}/config:/etc/prometheus
+      - ${PROMETHEUS_DIR}/prom_data:/prometheus
+
+  oap:
+    image: apache/skywalking-oap-server:latest
+    container_name: oap
+    ports:
+      - ${SKYWALKING_OAP_GRPC_PORT}:11800
+      - ${SKYWALKING_OAP_HTTP_PORT}:12800
+      - ${SKYWALKING_OAP_LOKI_PORT}:3100
+    environment:
+      SW_STORAGE: elasticsearch
+      SW_STORAGE_ES_CLUSTER_NODES: elasticsearch:9200
+      SW_HEALTH_CHECKER: default
+      SW_TELEMETRY: prometheus
+      JAVA_OPTS: "-Xms2048m -Xmx2048m"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "/skywalking/bin/swctl ch" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # skywalking-ui:
+  #   image: apache/skywalking-ui:latest
+  #   container_name: skywalking-ui
+  #   depends_on:
+  #     oap:
+  #       condition: service_healthy
+  #   links:
+  #     - oap
+  #   ports:
+  #     - 18002:8080
+  #   environment:
+  #     SW_OAP_ADDRESS: http://oap:12800
+  #     SW_ZIPKIN_ADDRESS: http://oap:9412
+
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    ports:
+      - ${GRAFANA_PORT}:3000
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - GF_INSTALL_PLUGINS=https://dist.apache.org/repos/dist/dev/skywalking/grafana-plugins/0.1.0/apache-skywalking-datasource-0.1.0.zip;apache-skywalking-datasource
+    volumes:
+      - ${GRAFANA_DIR}/provisioning:/etc/grafana/provisioning
+      - ${GRAFANA_DIR}/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      oap:
+        condition: service_healthy
+        
+networks:
+  rmq:
+    name: rmq
+    driver: bridge
+
+  apollo:
+    name: apollo
+    driver: bridge
+
+  xxl-job:
+    name: xxl-job
+    driver: bridge

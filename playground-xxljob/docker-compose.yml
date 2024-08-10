@@ -1,0 +1,38 @@
+version: '3'
+
+services:
+  xxl-job-mysql:
+    image: mysql:${XXL_JOB_MYSQL_TAG}
+    container_name: xxl-job-mysql
+    command:
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_general_ci
+      --lower-case-table-names=1
+    environment:
+      MYSQL_ROOT_PASSWORD: ${XXL_JOB_MYSQL_ROOT_PASSWORD}
+    ports:
+      - ${XXL_JOB_MYSQL_PORT}:3306
+    volumes:
+      - ${XXL_JOB_DIR}/sql:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  xxl-job-admin:
+    image: xuxueli/xxl-job-admin:${XXL_JOB_TAG}
+    container_name: xxl-job-admin
+    ports:
+      - ${XXL_JOB_ADMIN_PORT}:8080
+    volumes:
+      - ${XXL_JOB_DIR}/data/logs:/data/applogs
+      - ${XXL_JOB_DIR}/data/xxl-job/:/xxl-job
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://xxl-job-mysql:${XXL_JOB_MYSQL_PORT}/xxl_job?Unicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ${XXL_JOB_MYSQL_ROOT_PASSWORD}
+    depends_on:
+      xxl-job-mysql:
+        condition: service_healthy

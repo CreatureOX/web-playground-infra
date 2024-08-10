@@ -1,0 +1,14 @@
+version: '3'
+
+services:
+  redis:
+    image: redis:${REDIS_TAG}
+    container_name: redis 
+    ports:
+      - ${REDIS_PORT}:6379
+    volumes:
+      - ${REDIS_DIR}/dаta:/root/redis
+      - ${REDIS_DIR}/redis.conf:/usr/local/etc/redis/redis.conf
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_PORT=${REDIS_PORT}

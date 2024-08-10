@@ -1,0 +1,1 @@
+docker-compose --env-file=standalone.env up -d

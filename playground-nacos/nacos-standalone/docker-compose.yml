@@ -1,0 +1,15 @@
+version: '3'
+
+services:
+  nacos:
+    image: nacos/nacos-server
+    container_name: nacos
+    ports:
+      - ${NACOS_PORT}:8848
+      - ${NACOS_GRPC_PORT}:9848
+      - ${NACOS_GRPC_SYNC_PORT}:9849
+    environment:
+      - MODE=standalone  
+    # volumes:
+    #   - ${NACOS_DIR}/nacos/logs:/home/nacos/logs
+    #   - ${NACOS_DIR}/nacos/plugins:/home/nacos/plugins

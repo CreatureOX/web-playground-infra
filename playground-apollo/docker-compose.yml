@@ -1,0 +1,84 @@
+version: '3'
+
+networks:
+  apollo:
+    name: apollo
+
+services:
+  apollo-mysql:
+    image: mysql:${APOLLO_MYSQL_TAG}
+    container_name: apollo-mysql
+    command:
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_general_ci
+      --lower-case-table-names=1  
+    environment:
+      MYSQL_ROOT_PASSWORD: ${APOLLO_MYSQL_ROOT_PASSWORD}
+    ports:
+      - ${APOLLO_MYSQL_PORT}:3306
+    volumes:
+      - ./sql:/docker-entrypoint-initdb.d
+    networks:
+      - apollo
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  apollo-configservice:
+    image: apolloconfig/apollo-configservice:${APOLLO_TAG}
+    container_name: apollo-configservice
+    depends_on:
+      apollo-mysql:
+        condition: service_healthy
+    ports:
+      - ${APOLLO_CONFIG_PORT}:8080
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://apollo-mysql:${APOLLO_MYSQL_PORT}/ApolloConfigDB?zeroDateTimeBehavior=convertToNull&useUnicode=true&characterEncoding=utf-8&allowMultiQueries=true&useSSL=false&allowPublicKeyRetrieval=true
+      - SPRING_DATASOURCE_USERNAME=root
+      - SPRING_DATASOURCE_PASSWORD=${APOLLO_MYSQL_ROOT_PASSWORD}  
+    networks:
+      - apollo
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-cache --spider 'http://localhost:8080/health' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+      
+  apollo-adminservice:
+    image: apolloconfig/apollo-adminservice:${APOLLO_TAG}
+    container_name: apollo-adminservice
+    depends_on:
+      apollo-configservice:
+        condition: service_healthy      
+    ports:
+      - ${APOLLO_ADMIN_PORT}:8090
+    networks:
+      - apollo
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://apollo-mysql:${APOLLO_MYSQL_PORT}/ApolloConfigDB?zeroDateTimeBehavior=convertToNull&useUnicode=true&characterEncoding=utf-8&allowMultiQueries=true&useSSL=false&allowPublicKeyRetrieval=true
+      - SPRING_DATASOURCE_USERNAME=root
+      - SPRING_DATASOURCE_PASSWORD=${APOLLO_MYSQL_ROOT_PASSWORD}
+      - EUREKA_SERVER_ENABLE=true
+      - EUREKA_URLS=http://apollo-configservice:8080/eureka
+
+  apollo-portal:
+    image: apolloconfig/apollo-portal:${APOLLO_TAG}
+    container_name: apollo-portal
+    depends_on:
+      apollo-configservice:
+        condition: service_healthy
+    ports:
+      - ${APOLLO_PORTAL_PORT}:8070
+    networks:
+      - apollo
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://apollo-mysql:${APOLLO_MYSQL_PORT}/ApolloPortalDB?zeroDateTimeBehavior=convertToNull&useUnicode=true&characterEncoding=utf-8&allowMultiQueries=true&useSSL=false&allowPublicKeyRetrieval=true
+      - SPRING_DATASOURCE_USERNAME=root
+      - SPRING_DATASOURCE_PASSWORD=${APOLLO_MYSQL_ROOT_PASSWORD}
+      - APOLLO_PORTAL_ENVS=dev
+      - DEV_META=http://apollo-configservice:8080
+
